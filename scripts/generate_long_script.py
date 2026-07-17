@@ -1,10 +1,12 @@
 import json
 import os
-import openai # سنستخدم OpenAI API بدلاً من Groq
+from openai import OpenAI  # مكتبة openai تُستخدم فقط كـ client متوافق، الاستدعاء الفعلي لـ Groq
 
-# تهيئة OpenAI API
-# يجب أن يكون مفتاح API متاحاً كمتغير بيئة
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# تهيئة العميل ليتوجه إلى Groq بدلاً من OpenAI
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
 
 def generate_script(topic, duration_minutes=15):
     # تقدير عدد الكلمات اللازمة لمدة 15 دقيقة (بمعدل 150 كلمة/دقيقة)
@@ -37,15 +39,15 @@ def generate_script(topic, duration_minutes=15):
     """
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o", # يمكن تغيير النموذج حسب التوفر والجودة المطلوبة
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",  # موديل Groq المجاني
             messages=[
                 {"role": "system", "content": "أنت مساعد متخصص في توليد محتوى فيديو تعليمي باللغة العربية."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=4000, # زيادة الحد الأقصى للتوكنات ليتناسب مع المحتوى الطويل
-            response_format={ "type": "json_object" }
+            max_tokens=4000,
+            response_format={"type": "json_object"}
         )
         script_data = json.loads(response.choices[0].message.content)
         return script_data
@@ -56,18 +58,15 @@ def generate_script(topic, duration_minutes=15):
 if __name__ == "__main__":
     # هذا الجزء سيتم استدعاؤه من GitHub Actions
     # سيقرأ الموضوع من متغير بيئة أو من topics.txt
-    
-    # افتراضياً، سنقرأ من topics.txt كما في المشروع السابق
+
     topic_file = "topics.txt"
     video_topic = ""
     if os.path.exists(topic_file):
         with open(topic_file, "r", encoding="utf-8") as f:
             topics = [line.strip() for line in f if line.strip()]
         if topics:
-            video_topic = topics[0] # نأخذ أول موضوع
-            # يمكننا هنا نقل الموضوع إلى used_topics.txt وحذفه من topics.txt
-            # ولكن هذا سيتم إدارته بواسطة pick_topic.py لاحقاً
-    
+            video_topic = topics[0]  # نأخذ أول موضوع
+
     if not video_topic:
         video_topic = os.getenv("VIDEO_TOPIC", "تطور الذكاء الاصطناعي وتأثيره على البيئة والسلوك البشري")
 
@@ -78,8 +77,7 @@ if __name__ == "__main__":
         with open("script.json", "w", encoding="utf-8") as f:
             json.dump(script_output, f, ensure_ascii=False, indent=4)
         print("Script generated successfully to script.json")
-        
-        # تحديث content.json أيضاً
+
         content_data = {
             "title": script_output["title"],
             "description": script_output["description"],
