@@ -53,6 +53,11 @@ jobs:
     - name: Fetch Video Clips
       run: python scripts/fetch_high_quality_clips.py
 
+    - name: Download Arabic Font
+      run: |
+        mkdir -p Noto-Naskh
+        curl -L -o "Noto-Naskh/NotoNaskh-Regular.ttf" "https://raw.githubusercontent.com/jenskutilek/free-fonts/master/Noto/Noto%20Naskh%20Arabic/TTF/NotoNaskhArabic-Regular.ttf"
+
     - name: Assemble Video
       run: python scripts/assemble_long_video.py
 
