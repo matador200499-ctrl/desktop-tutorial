@@ -1,6 +1,6 @@
 import json
 import os
-from moviepy.editor import *
+from moviepy import *
 from moviepy.video.tools.subtitles import SubtitlesClip
 
 # تحديد الخط العربي (يجب أن يكون الخط مثبتاً في البيئة)
