@@ -1,58 +1,50 @@
-name: Weekly Video Publisher
+import json
+import os
+import requests
 
-on:
-  schedule:
-    - cron: '0 0 * * 0'
-  workflow_dispatch:
-    inputs:
-      topic:
-        description: 'موضوع الفيديو'
-        required: false
-        default: ''
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
-env:
-  PYTHONUNBUFFERED: "1"
-  PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-  YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-  YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-  YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-  GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+def fetch_clips(script_file="script.json", clips_dir="clips"):
+    if not os.path.exists(clips_dir):
+        os.makedirs(clips_dir)
 
-jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg fonts-noto fonts-noto-cjk fonts-hosny-amiri
-        pip install -r requirements.txt
-    - name: Pick Video Topic
-      run: python pick_topic.py
-    - name: Generate Script
-      run: python scripts/generate_long_script.py
-    - name: Generate Voiceover
-      run: python scripts/generate_voice.py
-    - name: Fetch Video Clips
-      run: python scripts/fetch_high_quality_clips.py
-    - name: Assemble Video
-      run: python scripts/assemble_long_video.py
-    - name: Upload Video to YouTube
-      run: python scripts/upload_youtube.py
-      env:
-        VIDEO_PATH: final_video.mp4
-        PRIVACY_STATUS: public
-    - name: Commit topic changes
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add topics.txt used_topics.txt
-        git commit -m "تحديث قائمة المواضيع" || echo "لا يوجد تغييرات"
-        git pull --rebase origin main
-        git push
+    with open(script_file, "r", encoding="utf-8") as f:
+        script_data = json.load(f)
+
+    scenes = script_data.get("scenes", [])
+    headers = {"Authorization": PEXELS_API_KEY}
+
+    for i, scene in enumerate(scenes):
+        scene_id = scene.get("id", i + 1)
+        visual_suggestions = scene.get("visual_suggestions", "")
+        
+        # إصلاح الخطأ: التأكد من تحويل القائمة إلى نص إذا لزم الأمر
+        if isinstance(visual_suggestions, list):
+            query = visual_suggestions[0] if visual_suggestions else "nature"
+        else:
+            query = visual_suggestions.split(',')[0].strip() if visual_suggestions else "nature"
+
+        print(f"Searching for clip: {query}...")
+        url = f"https://api.pexels.com/videos/search?query={query}&per_page=1&orientation=landscape"
+        
+        try:
+            response = requests.get(url, headers=headers )
+            data = response.json()
+            if data.get("videos"):
+                video_url = data["videos"][0]["video_files"][0]["link"]
+                video_data = requests.get(video_url).content
+                clip_path = os.path.join(clips_dir, f"scene_{scene_id}.mp4")
+                with open(clip_path, "wb") as f:
+                    f.write(video_data)
+                scene["clip_path"] = clip_path
+                print(f"  Clip saved for scene {scene_id}")
+            else:
+                print(f"  No video found for: {query}")
+        except Exception as e:
+            print(f"  Error fetching clip: {e}")
+
+    with open(script_file, "w", encoding="utf-8") as f:
+        json.dump(script_data, f, ensure_ascii=False, indent=4)
+
+if __name__ == "__main__":
+    fetch_clips()
