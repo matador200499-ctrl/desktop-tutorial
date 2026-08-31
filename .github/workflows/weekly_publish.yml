@@ -1,47 +1,22 @@
-import os
-import sys
-from groq import Groq
+name: weekly_publish
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
-topic = "كيف تغيرت حياتنا اليومية بسبب الخوارزميات"
-if os.path.exists("topic.txt"):
-    with open("topic.txt", "r", encoding="utf-8") as f:
-        topic = f.read().strip()
-
-print(f"Generating script for topic: {topic}")
-
-# الموديلات الحالية الشغالة في Groq بتاريخ 31-08-2026
-MODELS_TO_TRY = [
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "llama-3.3-70b-versatile", # fallback لو رجع
-    "llama-3.1-8b-instant"
-]
-
-for model_name in MODELS_TO_TRY:
-    try:
-        print(f"Trying model: {model_name}")
-        resp = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": "انت كاتب سكريبتات يوتيوب محترف بالعربي"},
-                {"role": "user", "content": f"اكتب سكريبت طويل 1200 كلمة عن: {topic}"}
-            ],
-            temperature=0.7,
-            max_tokens=4096
-        )
-        script = resp.choices[0].message.content
-        os.makedirs("output", exist_ok=True)
-        with open("output/script.txt", "w", encoding="utf-8") as f:
-            f.write(script)
-        with open("script.txt", "w", encoding="utf-8") as f:
-            f.write(script)
-        print(f"✅ Success with {model_name}")
-        sys.exit(0)
-    except Exception as e:
-        print(f"Model {model_name} failed: {e}")
-        continue
-
-print("FATAL: كل الموديلات فشلت")
-sys.exit(1)
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: pip install groq requests
+      - name: Generate Script
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python scripts/generate_long_script.py
