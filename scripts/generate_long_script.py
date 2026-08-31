@@ -1,97 +1,108 @@
-import json
 import os
 import sys
-import traceback
 from groq import Groq
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# 1. إعداد العميل
+api_key = os.environ.get("GROQ_API_KEY")
+if not api_key:
+    print("FATAL ERROR: GROQ_API_KEY مش موجود في الـ Secrets")
+    sys.exit(1)
 
-def generate_script(topic, duration_minutes=15):
-    word_count = duration_minutes * 150
+client = Groq(api_key=api_key)
 
+# 2. قراءة موضوع الفيديو
+# بيحاول يقرأه من المتغير اللي بابعته الـ workflow أو من ملف topic.txt
+topic = os.environ.get("VIDEO_TOPIC", "").strip()
+
+if not topic:
+    try:
+        # لو الـ workflow بيكتب الموضوع في ملف مؤقت
+        if os.path.exists("topic.txt"):
+            with open("topic.txt", "r", encoding="utf-8") as f:
+                topic = f.read().strip()
+        elif os.path.exists("scripts/topic.txt"):
+            with open("scripts/topic.txt", "r", encoding="utf-8") as f:
+                topic = f.read().strip()
+    except Exception as e:
+        print(f"Warning: مقدرتش اقرا topic.txt: {e}")
+
+if not topic:
+    # لو لسه فاضي خد اول سطر من topics.txt
+    try:
+        with open("topics.txt", "r", encoding="utf-8") as f:
+            lines = [l.strip() for l in f.readlines() if l.strip()]
+            if lines:
+                topic = lines[0]
+    except:
+        pass
+
+if not topic:
+    topic = "كيف تغيرت حياتنا اليومية بسبب الخوارزميات"
+
+print(f"Generating script for topic: {topic}")
+
+# 3. الموديلات اللي شغالة حاليا في Groq - بنجربهم بالترتيب
+MODELS_TO_TRY = [
+    "llama3-70b-8192",
+    "llama-3.1-70b-versatile",
+    "llama-3.1-8b-instant",
+    "meta-llama/llama-4-maverick-17b-128e-instruct"
+]
+
+def generate_script(topic_text):
     prompt = f"""
-    أنت مساعد متخصص في توليد محتوى فيديو تعليمي باللغة العربية. 
-    الموضوع الرئيسي: {topic}
-    
-    الرجاء كتابة سكريبت فيديو مفصل ومدته {duration_minutes} دقيقة، مقسماً إلى ثلاثة أقسام رئيسية:
-    1.  **العلوم**: (حوالي 5 دقائق) - تناول الجوانب العلمية للموضوع، الاكتشافات، المفاهيم.
-    2.  **الطبيعة**: (حوالي 5 دقائق) - استكشاف العلاقة بين الموضوع والعالم الطبيعي، البيئة، الكائنات الحية.
-    3.  **علم النفس**: (حوالي 5 دقائق) - ربط الموضوع بالسلوك البشري، الصحة النفسية، التأثيرات الاجتماعية.
-    
-    يجب أن يكون السكريبت متماسكاً، جذاباً، بلغة عربية فصحى مبسطة، مع روابط منطقية بين الأقسام. 
-    يجب أن يتضمن السكريبت إشارات واضحة إلى أنواع المشاهد المرئية المقترحة لكل فقرة (مثلاً: [مشهد: رسوم بيانية لتطور الذكاء الاصطناعي]، [مشهد: لقطات وثائقية لغابات الأمازون]).
-    
-    الحد الأدنى للكلمات: {word_count} كلمة.
-    
-    الرجاء إخراج السكريبت بصيغة JSON كالتالي:
-    {{
-        "title": "عنوان الفيديو المقترح",
-        "description": "وصف موجز للفيديو",
-        "tags": ["كلمة مفتاحية1", "كلمة مفتاحية2"],
-        "scenes": [
-            {{"id": 1, "text": "نص المشهد الأول", "visual_suggestions": "اقتراحات مرئية للمشهد الأول"}},
-            {{"id": 2, "text": "نص المشهد الثاني", "visual_suggestions": "اقتراحات مرئية للمشهد الثاني"}}
-        ]
-    }}
+    اكتب سكريبت فيديو يوتيوب طويل ومشوق باللهجة المصرية العامية البسيطة عن موضوع: "{topic_text}"
+
+    الشروط:
+    - يبدأ بمقدمة قوية تخطف الانتباه (Hook)
+    - مقسم لـ 4-5 فصول
+    - مدة القراءة حوالي 8-10 دقائق (حوالي 1200-1500 كلمة)
+    - لغة عربية بسيطة ومفهومة
+    - في النهاية اطلب من المشاهد الاشتراك
+    - لا تكتب تعليمات للمونتاج، اكتب النص المنطوق فقط
     """
 
-    if not os.getenv("GROQ_API_KEY"):
-        print("FATAL: متغير البيئة GROQ_API_KEY غير موجود أو فاضي.")
-        sys.exit(1)
+    last_error = None
+    for model_name in MODELS_TO_TRY:
+        try:
+            print(f"Trying model: {model_name}")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "انت كاتب سكريبتات يوتيوب محترف، تكتب بالعربي بطريقة مشوقة."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=4096,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Model {model_name} failed: {e}")
+            last_error = e
+            continue
 
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "أنت مساعد متخصص في توليد محتوى فيديو تعليمي باللغة العربية."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=4000,
-            response_format={"type": "json_object"}
-        )
-        raw_content = response.choices[0].message.content
-        script_data = json.loads(raw_content)
-        return script_data
+    # لو كل الموديلات فشلت
+    raise last_error
 
-    except Exception as e:
-        print("=" * 60)
-        print("FATAL ERROR while generating script:")
-        print(f"Type: {type(e).__name__}")
-        print(f"Message: {e}")
-        print("-" * 60)
-        traceback.print_exc()
-        print("=" * 60)
-        sys.exit(1)
+try:
+    script_content = generate_script(topic)
 
-if __name__ == "__main__":
-    topic_file = "topics.txt"
-    video_topic = ""
-    if os.path.exists(topic_file):
-        with open(topic_file, "r", encoding="utf-8") as f:
-            topics = [line.strip() for line in f if line.strip()]
-        if topics:
-            video_topic = topics[0]
+    # 4. حفظ السكريبت
+    os.makedirs("output", exist_ok=True)
+    with open("output/script.txt", "w", encoding="utf-8") as f:
+        f.write(script_content)
 
-    if not video_topic:
-        video_topic = os.getenv("VIDEO_TOPIC", "تطور الذكاء الاصطناعي وتأثيره على البيئة والسلوك البشري")
+    # نحفظه برضه في المكان اللي باقي الخطوات بتقرا منه
+    with open("script.txt", "w", encoding="utf-8") as f:
+        f.write(script_content)
 
-    print(f"Generating script for topic: {video_topic}")
-    script_output = generate_script(video_topic)
+    print("✅ Script generated successfully!")
+    print(f"Length: {len(script_content)} chars")
 
-    if script_output:
-        with open("script.json", "w", encoding="utf-8") as f:
-            json.dump(script_output, f, ensure_ascii=False, indent=4)
-        print("Script generated successfully to script.json")
-
-        content_data = {
-            "title": script_output["title"],
-            "description": script_output["description"],
-            "tags": script_output["tags"]
-        }
-        with open("content.json", "w", encoding="utf-8") as f:
-            json.dump(content_data, f, ensure_ascii=False, indent=4)
-        print("Content data generated successfully to content.json")
-    else:
-        print("Failed to generate script.")
-        sys.exit(1)
+except Exception as e:
+    print(f"FATAL ERROR while generating script:")
+    print(f"Type: {type(e).__name__}")
+    print(f"Message: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
