@@ -1,54 +1,47 @@
-name: weekly_publish.yml
+import os
+import sys
+from groq import Groq
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-  schedule:
-    - cron: '0 8 * * 6'  # كل سبت الساعة 8 الصبح
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+topic = "كيف تغيرت حياتنا اليومية بسبب الخوارزميات"
+if os.path.exists("topic.txt"):
+    with open("topic.txt", "r", encoding="utf-8") as f:
+        topic = f.read().strip()
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+print(f"Generating script for topic: {topic}")
 
-      - name: Install dependencies
-        run: |
-          pip install groq pexels_api python-dotenv requests moviepy pillow
+# الموديلات الحالية الشغالة في Groq بتاريخ 31-08-2026
+MODELS_TO_TRY = [
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile", # fallback لو رجع
+    "llama-3.1-8b-instant"
+]
 
-      - name: Pick Video Topic
-        run: python scripts/pick_topic.py
+for model_name in MODELS_TO_TRY:
+    try:
+        print(f"Trying model: {model_name}")
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "انت كاتب سكريبتات يوتيوب محترف بالعربي"},
+                {"role": "user", "content": f"اكتب سكريبت طويل 1200 كلمة عن: {topic}"}
+            ],
+            temperature=0.7,
+            max_tokens=4096
+        )
+        script = resp.choices[0].message.content
+        os.makedirs("output", exist_ok=True)
+        with open("output/script.txt", "w", encoding="utf-8") as f:
+            f.write(script)
+        with open("script.txt", "w", encoding="utf-8") as f:
+            f.write(script)
+        print(f"✅ Success with {model_name}")
+        sys.exit(0)
+    except Exception as e:
+        print(f"Model {model_name} failed: {e}")
+        continue
 
-      - name: Generate Script
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: python scripts/generate_long_script.py
-
-      - name: Generate Voiceover
-        run: python scripts/generate_voiceover.py
-
-      - name: Fetch Video Clips
-        env:
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: python scripts/fetch_clips.py
-
-      - name: Download Arabic Font
-        run: python scripts/download_font.py
-
-      - name: Assemble Video
-        run: python scripts/assemble_video.py
-
-      - name: Upload Video to YouTube
-        env:
-          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-        run: python scripts/upload_youtube.py
+print("FATAL: كل الموديلات فشلت")
+sys.exit(1)
