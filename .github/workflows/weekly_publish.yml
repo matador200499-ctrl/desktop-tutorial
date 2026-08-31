@@ -1,81 +1,77 @@
-name: Weekly Video Publisher
-on:
-  schedule:
-    # يتم التشغيل كل يوم أحد في منتصف الليل (00:00 UTC)
-    - cron: '0 0 * * 0'
-  workflow_dispatch:
-    inputs:
-      topic:
-        description: 'موضوع الفيديو (اختياري، سيتم اختياره تلقائياً إذا لم يتم تحديده)'
-        required: false
-        default: ''
-env:
-  PYTHONUNBUFFERED: "1"
-  PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-  YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-  YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-  YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-  GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+import os
+import sys
+from groq import Groq
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+api_key = os.environ.get("GROQ_API_KEY")
+if not api_key:
+    print("FATAL ERROR: GROQ_API_KEY مش موجود")
+    sys.exit(1)
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
-        pip install --upgrade pip
-        pip install -r requirements.txt
+client = Groq(api_key=api_key)
 
-    - name: Pick Video Topic
-      id: pick_topic_step
-      run: |
-        if [ -n "${{ github.event.inputs.topic }}" ]; then
-          echo "VIDEO_TOPIC=${{ github.event.inputs.topic }}" >> $GITHUB_ENV
-        else
-          python scripts/pick_topic.py
-        fi
+# قراءة الموضوع
+topic = os.environ.get("VIDEO_TOPIC", "").strip()
+if not topic:
+    try:
+        if os.path.exists("topic.txt"):
+            with open("topic.txt", "r", encoding="utf-8") as f:
+                topic = f.read().strip()
+    except:
+        pass
 
-    - name: Generate Script
-      run: python scripts/generate_long_script.py
+if not topic:
+    try:
+        with open("topics.txt", "r", encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+            if lines:
+                topic = lines[0]
+    except:
+        pass
 
-    - name: Generate Voiceover
-      run: python scripts/generate_voice.py
+if not topic:
+    topic = "كيف تغيرت حياتنا اليومية بسبب الخوارزميات"
 
-    - name: Fetch Video Clips
-      run: python scripts/fetch_high_quality_clips.py
+print(f"Generating script for topic: {topic}")
 
-    - name: Download Arabic Font
-      run: |
-        mkdir -p Noto-Naskh
-        curl -L -o "Noto-Naskh/NotoNaskh-Regular.ttf" "https://raw.githubusercontent.com/jenskutilek/free-fonts/master/Noto/Noto%20Naskh%20Arabic/TTF/NotoNaskhArabic-Regular.ttf"
+MODELS_TO_TRY = [
+    "llama3-70b-8192",
+    "llama-3.1-70b-versatile",
+    "llama-3.1-8b-instant"
+]
 
-    - name: Assemble Video
-      run: python scripts/assemble_long_video.py
+def generate_script(topic_text):
+    prompt = f'اكتب سكريبت فيديو يوتيوب طويل ومشوق بالعربي عن موضوع: "{topic_text}" - مقدمة قوية، 4 فصول، حوالي 1200 كلمة، وفي الاخر اطلب الاشتراك.'
 
-    - name: Upload Video to YouTube
-      run: python scripts/upload_youtube.py
-      env:
-        VIDEO_PATH: final_video.mp4
-        PRIVACY_STATUS: private # يمكن تغييرها إلى public بعد المراجعة
+    last_error = None
+    for model_name in MODELS_TO_TRY:
+        try:
+            print(f"Trying model: {model_name}")
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "انت كاتب سكريبتات يوتيوب محترف تكتب بالعربي."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=4096
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Model {model_name} failed: {e}")
+            last_error = e
+            continue
+    raise last_error
 
-    - name: Upload Artifacts (Optional)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: video-artifacts
-        path: |
-          final_video.mp4
-          script.json
-          content.json
-          audio/
-          clips/
-        if-no-files-found: ignore
+try:
+    script_content = generate_script(topic)
+    os.makedirs("output", exist_ok=True)
+    with open("output/script.txt", "w", encoding="utf-8") as f:
+        f.write(script_content)
+    with open("script.txt", "w", encoding="utf-8") as f:
+        f.write(script_content)
+    print("✅ Script generated successfully!")
+except Exception as e:
+    print(f"FATAL ERROR while generating script: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
