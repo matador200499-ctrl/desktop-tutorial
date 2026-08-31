@@ -1,77 +1,54 @@
-import os
-import sys
-from groq import Groq
+name: weekly_publish.yml
 
-api_key = os.environ.get("GROQ_API_KEY")
-if not api_key:
-    print("FATAL ERROR: GROQ_API_KEY مش موجود")
-    sys.exit(1)
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 6'  # كل سبت الساعة 8 الصبح
 
-client = Groq(api_key=api_key)
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-# قراءة الموضوع
-topic = os.environ.get("VIDEO_TOPIC", "").strip()
-if not topic:
-    try:
-        if os.path.exists("topic.txt"):
-            with open("topic.txt", "r", encoding="utf-8") as f:
-                topic = f.read().strip()
-    except:
-        pass
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-if not topic:
-    try:
-        with open("topics.txt", "r", encoding="utf-8") as f:
-            lines = [l.strip() for l in f if l.strip()]
-            if lines:
-                topic = lines[0]
-    except:
-        pass
+      - name: Install dependencies
+        run: |
+          pip install groq pexels_api python-dotenv requests moviepy pillow
 
-if not topic:
-    topic = "كيف تغيرت حياتنا اليومية بسبب الخوارزميات"
+      - name: Pick Video Topic
+        run: python scripts/pick_topic.py
 
-print(f"Generating script for topic: {topic}")
+      - name: Generate Script
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python scripts/generate_long_script.py
 
-MODELS_TO_TRY = [
-    "llama3-70b-8192",
-    "llama-3.1-70b-versatile",
-    "llama-3.1-8b-instant"
-]
+      - name: Generate Voiceover
+        run: python scripts/generate_voiceover.py
 
-def generate_script(topic_text):
-    prompt = f'اكتب سكريبت فيديو يوتيوب طويل ومشوق بالعربي عن موضوع: "{topic_text}" - مقدمة قوية، 4 فصول، حوالي 1200 كلمة، وفي الاخر اطلب الاشتراك.'
+      - name: Fetch Video Clips
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python scripts/fetch_clips.py
 
-    last_error = None
-    for model_name in MODELS_TO_TRY:
-        try:
-            print(f"Trying model: {model_name}")
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "انت كاتب سكريبتات يوتيوب محترف تكتب بالعربي."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=4096
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            print(f"Model {model_name} failed: {e}")
-            last_error = e
-            continue
-    raise last_error
+      - name: Download Arabic Font
+        run: python scripts/download_font.py
 
-try:
-    script_content = generate_script(topic)
-    os.makedirs("output", exist_ok=True)
-    with open("output/script.txt", "w", encoding="utf-8") as f:
-        f.write(script_content)
-    with open("script.txt", "w", encoding="utf-8") as f:
-        f.write(script_content)
-    print("✅ Script generated successfully!")
-except Exception as e:
-    print(f"FATAL ERROR while generating script: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
+      - name: Assemble Video
+        run: python scripts/assemble_video.py
+
+      - name: Upload Video to YouTube
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python scripts/upload_youtube.py
